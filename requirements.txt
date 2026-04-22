@@ -1,0 +1,4 @@
+PyYAML==5.3        # Known vulnerability
+requests==2.19.1   # Old version with CVEs
+flask==0.12        # Outdated
+django==1.11       # Vulnerable version
