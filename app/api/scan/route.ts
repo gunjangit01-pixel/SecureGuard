@@ -151,13 +151,22 @@ async function runOsvScanner(scanPath: string): Promise<{
   counts: Record<"critical" | "high" | "medium" | "low", number>;
   score: number;
 }> {
+  // We inject the WinGet Links directory into the PATH in case the dev server was started
+  // before winget installed osv-scanner and hasn't inherited the updated system PATH.
+  const wingetPath = path.join(process.env.LOCALAPPDATA || "", "Microsoft", "WinGet", "Links");
+  const currentPath = process.env.PATH || process.env.Path || "";
+  const updatedPath = currentPath.includes(wingetPath) ? currentPath : `${currentPath};${wingetPath}`;
+
   const command = `"osv-scanner" scan --format=json "${scanPath}"`;
 
   let stdout = "";
   let stderr = "";
 
   try {
-    const result = await execAsync(command, { timeout: 180_000 });
+    const result = await execAsync(command, { 
+      timeout: 180_000,
+      env: { ...process.env, PATH: updatedPath, Path: updatedPath }
+    });
     stdout = result.stdout;
     stderr = result.stderr;
   } catch (err: unknown) {
