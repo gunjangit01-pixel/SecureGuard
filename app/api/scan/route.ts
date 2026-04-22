@@ -136,15 +136,7 @@ export function validateScanPath(rawPath: string): string {
 // OSV RUNNER (shared)
 // ─────────────────────────────────────────────
 
-interface NormalisedVuln {
-  id: string;
-  pkg: string;
-  severity: "critical" | "high" | "medium" | "low";
-  type: "CVE" | "Misconfiguration";
-  fix: string;
-  file: string;
-  summary: string;
-}
+import { runStaticScanner, NormalisedVuln } from "./scanner";
 
 async function runOsvScanner(scanPath: string): Promise<{
   vulns: NormalisedVuln[];
@@ -176,10 +168,15 @@ async function runOsvScanner(scanPath: string): Promise<{
     stderr = execErr.stderr ?? "";
 
     if (!stdout.trim()) {
-      throw Object.assign(new Error(`osv-scanner failed: ${execErr.message ?? "Unknown error"}`), {
-        isExecFailure: true,
-        stderr,
-      });
+      const errStr = (execErr.message ?? "") + stderr;
+      if (errStr.includes("No package sources found")) {
+        stdout = '{"results":[]}';
+      } else {
+        throw Object.assign(new Error(`osv-scanner failed: ${execErr.message ?? "Unknown error"}`), {
+          isExecFailure: true,
+          stderr,
+        });
+      }
     }
   }
 
@@ -199,7 +196,7 @@ async function runOsvScanner(scanPath: string): Promise<{
         const id = vuln.id ?? vuln.aliases?.[0] ?? "UNKNOWN";
         const severity = normaliseSeverity(vuln);
         const fix = extractFix(vuln, pkgName);
-        const type: "CVE" | "Misconfiguration" = "CVE";
+        const type: "CVE" | "Misconfiguration" | "Secret" = "CVE";
         const summary = vuln.summary ?? "";
 
         if (!vulns.some((v) => v.id === id && v.pkg === pkgName)) {
@@ -264,26 +261,56 @@ export async function POST(req: NextRequest) {
       repoLabel = scanPath;
     }
 
-    // ── Run OSV scanner ───────────────────────────────────────────────────
-    let result: Awaited<ReturnType<typeof runOsvScanner>>;
-    try {
-      result = await runOsvScanner(scanPath);
-    } catch (err: unknown) {
-      const e = err as Error & { isExecFailure?: boolean; stderr?: string };
-      return NextResponse.json(
-        { error: e.message, stderr: e.stderr ?? "" },
-        { status: 500 }
-      );
+    // ── Run Scanners ───────────────────────────────────────────────────
+    let osvResult: { vulns: NormalisedVuln[], counts: Record<string, number>, score: number } = { vulns: [], counts: { critical: 0, high: 0, medium: 0, low: 0 }, score: 100 };
+    let staticVulns: NormalisedVuln[] = [];
+    const scanErrors: string[] = [];
+
+    // Run both scanners concurrently, but don't fail the whole request if one fails
+    const [osv, st] = await Promise.allSettled([
+      runOsvScanner(scanPath),
+      runStaticScanner(scanPath)
+    ]);
+
+    if (osv.status === "fulfilled") {
+      osvResult = osv.value;
+    } else {
+      const e = osv.reason as Error;
+      scanErrors.push(`OSV Scanner error: ${e.message}`);
     }
+
+    if (st.status === "fulfilled") {
+      staticVulns = st.value;
+    } else {
+      const e = st.reason as Error;
+      scanErrors.push(`Static Scanner error: ${e.message}`);
+    }
+
+    // Combine results
+    const combinedVulns = [...osvResult.vulns, ...staticVulns];
+    
+    // Recalculate counts
+    const combinedCounts = { critical: 0, high: 0, medium: 0, low: 0 };
+    for (const v of combinedVulns) combinedCounts[v.severity]++;
+    
+    // Recalculate score
+    const combinedScore = computeScore(
+      combinedCounts.critical,
+      combinedCounts.high,
+      combinedCounts.medium,
+      combinedCounts.low
+    );
 
     return NextResponse.json({
       ok: true,
       scannedPath: repoLabel,
       isRemote,
-      vulnerabilities: result.vulns,
-      counts: result.counts,
-      score: result.score,
-      totalIssues: result.vulns.length,
+      vulnerabilities: combinedVulns,
+      counts: combinedCounts,
+      score: combinedScore,
+      totalIssues: combinedVulns.length,
+      scanErrors: scanErrors.length > 0 ? scanErrors : undefined,
+      error: scanErrors.length > 0 && combinedVulns.length === 0 ? scanErrors[0] : undefined
     });
 
   } catch (err: unknown) {

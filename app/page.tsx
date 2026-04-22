@@ -30,6 +30,9 @@ type Vulnerability = {
   type: VulnType;
   fix: string;
   file: string;
+  line?: number;
+  snippet?: string;
+  summary?: string;
 };
 
 type ScanHistory = {
@@ -64,14 +67,14 @@ const SEVERITY_STYLES: SeverityStyleMap = {
 };
 
 const MOCK_VULNERABILITIES: Vulnerability[] = [
-  { id: "CVE-2024-3912", pkg: "lodash", severity: "critical", type: "CVE", fix: "Upgrade to 4.17.21", file: "package.json" },
-  { id: "GHSA-7f3x-x4pr", pkg: "axios", severity: "high", type: "CVE", fix: "Upgrade to 1.6.0", file: "package.json" },
-  { id: "INSEC-001", pkg: "config.yaml", severity: "critical", type: "Misconfiguration", fix: "Remove hardcoded DB_PASSWORD", file: "config/db.yaml" },
-  { id: "INSEC-002", pkg: "server.js", severity: "high", type: "Misconfiguration", fix: "Disable debug mode", file: "src/server.js" },
-  { id: "CVE-2023-4863", pkg: "sharp", severity: "high", type: "CVE", fix: "Upgrade to 0.32.6", file: "package.json" },
-  { id: "INSEC-003", pkg: "nginx.conf", severity: "medium", type: "Misconfiguration", fix: "Enforce TLSv1.2+", file: "infra/nginx.conf" },
-  { id: "CVE-2024-0001", pkg: "express", severity: "medium", type: "CVE", fix: "Upgrade to 4.18.3", file: "package.json" },
-  { id: "INSEC-004", pkg: "Dockerfile", severity: "low", type: "Misconfiguration", fix: "Run as non-root user", file: "Dockerfile" },
+  { id: "CVE-2024-3912", pkg: "lodash", severity: "critical", type: "CVE", fix: "Upgrade to 4.17.21", file: "package.json", summary: "Prototype pollution in lodash" },
+  { id: "GHSA-7f3x-x4pr", pkg: "axios", severity: "high", type: "CVE", fix: "Upgrade to 1.6.0", file: "package.json", summary: "Cross-Site Request Forgery (CSRF)" },
+  { id: "INSEC-001", pkg: "config.yaml", severity: "critical", type: "Misconfiguration", fix: "Remove hardcoded DB_PASSWORD", file: "config/db.yaml", line: 12, snippet: "DB_PASSWORD: 'supersecretpassword'", summary: "Hardcoded secret or API key found" },
+  { id: "INSEC-002", pkg: "server.js", severity: "high", type: "Misconfiguration", fix: "Disable debug mode", file: "src/server.js", summary: "Debug mode enabled in production" },
+  { id: "CVE-2023-4863", pkg: "sharp", severity: "high", type: "CVE", fix: "Upgrade to 0.32.6", file: "package.json", summary: "Heap buffer overflow in libwebp" },
+  { id: "INSEC-003", pkg: "nginx.conf", severity: "medium", type: "Misconfiguration", fix: "Enforce TLSv1.2+", file: "infra/nginx.conf", summary: "Weak TLS protocols permitted" },
+  { id: "CVE-2024-0001", pkg: "express", severity: "medium", type: "CVE", fix: "Upgrade to 4.18.3", file: "package.json", summary: "Open redirect vulnerability" },
+  { id: "INSEC-004", pkg: "Dockerfile", severity: "low", type: "Misconfiguration", fix: "Run as non-root user", file: "Dockerfile", summary: "Container runs as root user" },
 ];
 
 const SCAN_HISTORY: ScanHistory[] = [
@@ -273,7 +276,7 @@ type SeverityCardProps = {
 
 function SeverityCard({ severity, count, total, active, onClick }: SeverityCardProps) {
   const style: SeverityStyle = SEVERITY_STYLES[severity];
-  const barWidth: number = Math.round((count / total) * 100);
+  const barWidth: number = Math.round((count / total) * 100) || 0;
 
   return (
     <div
@@ -327,14 +330,9 @@ function VulnRow({ vuln }: VulnRowProps) {
   return (
     <div
       style={{
-        display: "grid",
-        gridTemplateColumns: "80px 1fr 130px 150px 1fr",
-        gap: "12px",
-        alignItems: "center",
-        padding: "12px 16px",
         borderBottom: "1px solid #141414",
-        fontSize: "11px",
-        fontFamily: "'DM Mono', monospace",
+        display: "flex",
+        flexDirection: "column",
         transition: "background 0.15s",
         cursor: "default",
       }}
@@ -345,23 +343,101 @@ function VulnRow({ vuln }: VulnRowProps) {
         (e.currentTarget as HTMLDivElement).style.background = "transparent";
       }}
     >
-      <span style={{
-        background: style.badge,
-        color: style.text,
-        borderRadius: "4px",
-        padding: "3px 6px",
-        fontSize: "9px",
-        fontWeight: 700,
-        textTransform: "uppercase",
-        letterSpacing: "0.06em",
-        textAlign: "center",
-      }}>
-        {vuln.severity}
-      </span>
-      <span style={{ color: "#e0e0e0", fontWeight: 500 }}>{vuln.id}</span>
-      <span style={{ color: "#555", fontSize: "10px" }}>{vuln.type}</span>
-      <span style={{ color: "#666", fontSize: "10px" }}>{vuln.file}</span>
-      <span style={{ color: "#40c070", fontSize: "10px" }}>→ {vuln.fix}</span>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "80px 1fr 130px 150px 1fr",
+          gap: "12px",
+          alignItems: "center",
+          padding: "12px 16px",
+          fontSize: "11px",
+          fontFamily: "'DM Mono', monospace",
+        }}
+      >
+        <span style={{
+          background: style.badge,
+          color: style.text,
+          borderRadius: "4px",
+          padding: "3px 6px",
+          fontSize: "9px",
+          fontWeight: 700,
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+          textAlign: "center",
+        }}>
+          {vuln.severity}
+        </span>
+        <span style={{ color: "#e0e0e0", fontWeight: 500 }}>{vuln.id}</span>
+        <span style={{ color: "#555", fontSize: "10px" }}>{vuln.type}</span>
+        <span style={{ color: "#666", fontSize: "10px" }}>{vuln.file}</span>
+        <span style={{ color: "#aaa", fontSize: "10px" }}>
+          {vuln.summary ? vuln.summary : vuln.fix}
+        </span>
+      </div>
+
+      {(vuln.snippet || vuln.summary) && (
+        <div style={{
+          padding: "0 16px 16px 108px", // Align with the start of the ID column
+          display: "flex",
+          flexDirection: "column",
+          gap: "10px",
+        }}>
+          {vuln.snippet && (
+            <div style={{
+              display: "flex",
+              gap: "12px",
+              alignItems: "flex-start",
+            }}>
+              <span style={{ color: "#555", fontSize: "9px", marginTop: "2px", letterSpacing: "0.05em" }}>
+                L{vuln.line}:
+              </span>
+              <code style={{
+                color: "#d0d0d0",
+                background: "#1a1a1a",
+                padding: "4px 8px",
+                borderRadius: "4px",
+                fontSize: "10px",
+                fontFamily: "'DM Mono', monospace",
+                wordBreak: "break-all",
+                border: "1px solid #2a2a2a"
+              }}>
+                {vuln.snippet}
+              </code>
+            </div>
+          )}
+          
+          <div style={{
+            background: "#080808",
+            border: "1px solid #1a1a1a",
+            borderRadius: "6px",
+            padding: "10px 14px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "8px",
+            fontSize: "10px",
+            fontFamily: "'DM Mono', monospace",
+          }}>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <span style={{ color: "#ff8c00", fontWeight: 600, width: "45px" }}>Issue:</span>
+              <span style={{ color: "#e0e0e0" }}>{vuln.summary || "Security vulnerability detected"}</span>
+            </div>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              <span style={{ color: "#40c070", fontWeight: 600, width: "45px" }}>Fix:</span>
+              <code style={{
+                color: "#40c070",
+                background: "#051a0a",
+                padding: "3px 6px",
+                borderRadius: "4px",
+                border: "1px solid #0a3d1a",
+                fontSize: "10px",
+                fontFamily: "'DM Mono', monospace",
+              }}>
+                {vuln.fix}
+              </code>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
