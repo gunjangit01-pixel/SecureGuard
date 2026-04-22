@@ -3,6 +3,19 @@
 import { useState, useEffect } from "react";
 
 // ─────────────────────────────────────────────
+// OSV SCAN RESPONSE TYPES
+// ─────────────────────────────────────────────
+type OsvScanResponse = {
+  ok: boolean;
+  scannedPath?: string;
+  vulnerabilities?: Vulnerability[];
+  counts?: SeverityCount;
+  score?: number;
+  totalIssues?: number;
+  error?: string;
+};
+
+// ─────────────────────────────────────────────
 // TYPE DEFINITIONS
 // ─────────────────────────────────────────────
 
@@ -17,6 +30,9 @@ type Vulnerability = {
   type: VulnType;
   fix: string;
   file: string;
+  line?: number;
+  snippet?: string;
+  summary?: string;
 };
 
 type ScanHistory = {
@@ -51,14 +67,14 @@ const SEVERITY_STYLES: SeverityStyleMap = {
 };
 
 const MOCK_VULNERABILITIES: Vulnerability[] = [
-  { id: "CVE-2024-3912", pkg: "lodash", severity: "critical", type: "CVE", fix: "Upgrade to 4.17.21", file: "package.json" },
-  { id: "GHSA-7f3x-x4pr", pkg: "axios", severity: "high", type: "CVE", fix: "Upgrade to 1.6.0", file: "package.json" },
-  { id: "INSEC-001", pkg: "config.yaml", severity: "critical", type: "Misconfiguration", fix: "Remove hardcoded DB_PASSWORD", file: "config/db.yaml" },
-  { id: "INSEC-002", pkg: "server.js", severity: "high", type: "Misconfiguration", fix: "Disable debug mode", file: "src/server.js" },
-  { id: "CVE-2023-4863", pkg: "sharp", severity: "high", type: "CVE", fix: "Upgrade to 0.32.6", file: "package.json" },
-  { id: "INSEC-003", pkg: "nginx.conf", severity: "medium", type: "Misconfiguration", fix: "Enforce TLSv1.2+", file: "infra/nginx.conf" },
-  { id: "CVE-2024-0001", pkg: "express", severity: "medium", type: "CVE", fix: "Upgrade to 4.18.3", file: "package.json" },
-  { id: "INSEC-004", pkg: "Dockerfile", severity: "low", type: "Misconfiguration", fix: "Run as non-root user", file: "Dockerfile" },
+  { id: "CVE-2024-3912", pkg: "lodash", severity: "critical", type: "CVE", fix: "Upgrade to 4.17.21", file: "package.json", summary: "Prototype pollution in lodash" },
+  { id: "GHSA-7f3x-x4pr", pkg: "axios", severity: "high", type: "CVE", fix: "Upgrade to 1.6.0", file: "package.json", summary: "Cross-Site Request Forgery (CSRF)" },
+  { id: "INSEC-001", pkg: "config.yaml", severity: "critical", type: "Misconfiguration", fix: "Remove hardcoded DB_PASSWORD", file: "config/db.yaml", line: 12, snippet: "DB_PASSWORD: 'supersecretpassword'", summary: "Hardcoded secret or API key found" },
+  { id: "INSEC-002", pkg: "server.js", severity: "high", type: "Misconfiguration", fix: "Disable debug mode", file: "src/server.js", summary: "Debug mode enabled in production" },
+  { id: "CVE-2023-4863", pkg: "sharp", severity: "high", type: "CVE", fix: "Upgrade to 0.32.6", file: "package.json", summary: "Heap buffer overflow in libwebp" },
+  { id: "INSEC-003", pkg: "nginx.conf", severity: "medium", type: "Misconfiguration", fix: "Enforce TLSv1.2+", file: "infra/nginx.conf", summary: "Weak TLS protocols permitted" },
+  { id: "CVE-2024-0001", pkg: "express", severity: "medium", type: "CVE", fix: "Upgrade to 4.18.3", file: "package.json", summary: "Open redirect vulnerability" },
+  { id: "INSEC-004", pkg: "Dockerfile", severity: "low", type: "Misconfiguration", fix: "Run as non-root user", file: "Dockerfile", summary: "Container runs as root user" },
 ];
 
 const SCAN_HISTORY: ScanHistory[] = [
@@ -140,65 +156,108 @@ function ScoreRing({ score }: ScoreRingProps) {
 // ─────────────────────────────────────────────
 
 type ScanInputProps = {
-  onScan: (url: string) => void;
+  onScan: (path: string) => Promise<void>;
 };
 
 function ScanInput({ onScan }: ScanInputProps) {
   const [value, setValue] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(false);
 
-  const handleScan = (): void => {
-    if (!value.trim()) return;
+  const handleScan = async (): Promise<void> => {
+    if (!value.trim() || loading) return;
     setLoading(true);
-    setTimeout(() => {
+    try {
+      await onScan(value.trim());
+    } finally {
       setLoading(false);
-      onScan(value);
-    }, 2200);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
     if (e.key === "Enter") handleScan();
   };
 
+  const isGitHub = /^https?:\/\/github\.com\//i.test(value.trim());
+  const hasValue = value.trim().length > 0;
+
   return (
-    <div style={{ display: "flex", gap: "10px", marginBottom: "28px" }}>
-      <input
-        value={value}
-        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setValue(e.target.value)}
-        onKeyDown={handleKeyDown}
-        placeholder="GitHub URL or paste repo path…"
-        style={{
-          flex: 1,
-          background: "#111",
-          border: "1px solid #2a2a2a",
-          borderRadius: "8px",
-          color: "#e0e0e0",
-          padding: "12px 16px",
-          fontSize: "13px",
-          fontFamily: "'DM Mono', monospace",
-          outline: "none",
-        }}
-      />
-      <button
-        onClick={handleScan}
-        disabled={loading}
-        style={{
-          background: loading ? "#1a1a1a" : "#cc2200",
-          color: loading ? "#555" : "#fff",
-          border: "none",
-          borderRadius: "8px",
-          padding: "12px 24px",
-          fontSize: "12px",
-          fontWeight: 600,
-          cursor: loading ? "not-allowed" : "pointer",
-          fontFamily: "'DM Mono', monospace",
-          letterSpacing: "0.04em",
-          transition: "background 0.2s",
-          minWidth: "110px",
-        }}
-      >
-        {loading ? "Scanning…" : "▶ Scan"}
-      </button>
+    <div style={{ marginBottom: "28px" }}>
+      <div style={{ display: "flex", gap: "10px" }}>
+        <div style={{ flex: 1, position: "relative" }}>
+          <input
+            value={value}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setValue(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="https://github.com/org/repo  or  D:\local\path"
+            style={{
+              width: "100%",
+              background: "#111",
+              border: `1px solid ${hasValue ? (isGitHub ? "#1a3d1a" : "#2a2a1a") : "#2a2a2a"}`,
+              borderRadius: "8px",
+              color: "#e0e0e0",
+              padding: "12px 16px",
+              paddingRight: hasValue ? "90px" : "16px",
+              fontSize: "13px",
+              fontFamily: "'DM Mono', monospace",
+              outline: "none",
+              boxSizing: "border-box",
+              transition: "border-color 0.2s",
+            }}
+          />
+          {hasValue && (
+            <span style={{
+              position: "absolute",
+              right: "10px",
+              top: "50%",
+              transform: "translateY(-50%)",
+              fontSize: "9px",
+              fontWeight: 700,
+              letterSpacing: "0.06em",
+              padding: "3px 8px",
+              borderRadius: "4px",
+              background: isGitHub ? "#0a2d0a" : "#2a2a10",
+              color: isGitHub ? "#40c070" : "#c0a030",
+              fontFamily: "'DM Mono', monospace",
+              pointerEvents: "none",
+            }}>
+              {isGitHub ? "🌐 GITHUB" : "📁 LOCAL"}
+            </span>
+          )}
+        </div>
+        <button
+          onClick={handleScan}
+          disabled={loading}
+          style={{
+            background: loading ? "#1a1a1a" : "#cc2200",
+            color: loading ? "#555" : "#fff",
+            border: "none",
+            borderRadius: "8px",
+            padding: "12px 24px",
+            fontSize: "12px",
+            fontWeight: 600,
+            cursor: loading ? "not-allowed" : "pointer",
+            fontFamily: "'DM Mono', monospace",
+            letterSpacing: "0.04em",
+            transition: "background 0.2s",
+            minWidth: "110px",
+            flexShrink: 0,
+          }}
+        >
+          {loading ? "Scanning…" : "▶ Scan"}
+        </button>
+      </div>
+      <div style={{
+        marginTop: "7px",
+        display: "flex",
+        gap: "20px",
+        fontSize: "9px",
+        color: "#333",
+        fontFamily: "'DM Mono', monospace",
+        letterSpacing: "0.04em",
+      }}>
+        <span>🌐 GitHub — paste any public repo URL to clone &amp; scan</span>
+        <span>📁 Local — paste an absolute folder path on this machine</span>
+      </div>
     </div>
   );
 }
@@ -217,7 +276,7 @@ type SeverityCardProps = {
 
 function SeverityCard({ severity, count, total, active, onClick }: SeverityCardProps) {
   const style: SeverityStyle = SEVERITY_STYLES[severity];
-  const barWidth: number = Math.round((count / total) * 100);
+  const barWidth: number = Math.round((count / total) * 100) || 0;
 
   return (
     <div
@@ -271,14 +330,9 @@ function VulnRow({ vuln }: VulnRowProps) {
   return (
     <div
       style={{
-        display: "grid",
-        gridTemplateColumns: "80px 1fr 130px 150px 1fr",
-        gap: "12px",
-        alignItems: "center",
-        padding: "12px 16px",
         borderBottom: "1px solid #141414",
-        fontSize: "11px",
-        fontFamily: "'DM Mono', monospace",
+        display: "flex",
+        flexDirection: "column",
         transition: "background 0.15s",
         cursor: "default",
       }}
@@ -289,23 +343,101 @@ function VulnRow({ vuln }: VulnRowProps) {
         (e.currentTarget as HTMLDivElement).style.background = "transparent";
       }}
     >
-      <span style={{
-        background: style.badge,
-        color: style.text,
-        borderRadius: "4px",
-        padding: "3px 6px",
-        fontSize: "9px",
-        fontWeight: 700,
-        textTransform: "uppercase",
-        letterSpacing: "0.06em",
-        textAlign: "center",
-      }}>
-        {vuln.severity}
-      </span>
-      <span style={{ color: "#e0e0e0", fontWeight: 500 }}>{vuln.id}</span>
-      <span style={{ color: "#555", fontSize: "10px" }}>{vuln.type}</span>
-      <span style={{ color: "#666", fontSize: "10px" }}>{vuln.file}</span>
-      <span style={{ color: "#40c070", fontSize: "10px" }}>→ {vuln.fix}</span>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "80px 1fr 130px 150px 1fr",
+          gap: "12px",
+          alignItems: "center",
+          padding: "12px 16px",
+          fontSize: "11px",
+          fontFamily: "'DM Mono', monospace",
+        }}
+      >
+        <span style={{
+          background: style.badge,
+          color: style.text,
+          borderRadius: "4px",
+          padding: "3px 6px",
+          fontSize: "9px",
+          fontWeight: 700,
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+          textAlign: "center",
+        }}>
+          {vuln.severity}
+        </span>
+        <span style={{ color: "#e0e0e0", fontWeight: 500 }}>{vuln.id}</span>
+        <span style={{ color: "#555", fontSize: "10px" }}>{vuln.type}</span>
+        <span style={{ color: "#666", fontSize: "10px" }}>{vuln.file}</span>
+        <span style={{ color: "#aaa", fontSize: "10px" }}>
+          {vuln.summary ? vuln.summary : vuln.fix}
+        </span>
+      </div>
+
+      {(vuln.snippet || vuln.summary) && (
+        <div style={{
+          padding: "0 16px 16px 108px", // Align with the start of the ID column
+          display: "flex",
+          flexDirection: "column",
+          gap: "10px",
+        }}>
+          {vuln.snippet && (
+            <div style={{
+              display: "flex",
+              gap: "12px",
+              alignItems: "flex-start",
+            }}>
+              <span style={{ color: "#555", fontSize: "9px", marginTop: "2px", letterSpacing: "0.05em" }}>
+                L{vuln.line}:
+              </span>
+              <code style={{
+                color: "#d0d0d0",
+                background: "#1a1a1a",
+                padding: "4px 8px",
+                borderRadius: "4px",
+                fontSize: "10px",
+                fontFamily: "'DM Mono', monospace",
+                wordBreak: "break-all",
+                border: "1px solid #2a2a2a"
+              }}>
+                {vuln.snippet}
+              </code>
+            </div>
+          )}
+          
+          <div style={{
+            background: "#080808",
+            border: "1px solid #1a1a1a",
+            borderRadius: "6px",
+            padding: "10px 14px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "8px",
+            fontSize: "10px",
+            fontFamily: "'DM Mono', monospace",
+          }}>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <span style={{ color: "#ff8c00", fontWeight: 600, width: "45px" }}>Issue:</span>
+              <span style={{ color: "#e0e0e0" }}>{vuln.summary || "Security vulnerability detected"}</span>
+            </div>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              <span style={{ color: "#40c070", fontWeight: 600, width: "45px" }}>Fix:</span>
+              <code style={{
+                color: "#40c070",
+                background: "#051a0a",
+                padding: "3px 6px",
+                borderRadius: "4px",
+                border: "1px solid #0a3d1a",
+                fontSize: "10px",
+                fontFamily: "'DM Mono', monospace",
+              }}>
+                {vuln.fix}
+              </code>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -363,34 +495,82 @@ export default function SecureGuardPage() {
   const [filter, setFilter] = useState<Severity | "all">("all");
   const [animatedScore, setAnimatedScore] = useState<number>(0);
 
-  // Animate score ring on mount
-  useEffect(() => {
-    const TARGET_SCORE: number = 38;
-    const timer = setTimeout(() => {
-      let current: number = 0;
-      const interval = setInterval(() => {
-        current++;
-        setAnimatedScore(current);
-        if (current >= TARGET_SCORE) clearInterval(interval);
-      }, 28);
-    }, 500);
+  // Live scan state
+  const [liveVulns, setLiveVulns] = useState<Vulnerability[] | null>(null);
+  const [liveCounts, setLiveCounts] = useState<SeverityCount | null>(null);
+  const [liveScore, setLiveScore] = useState<number | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [scanInfo, setScanInfo] = useState<string | null>(null);
 
+  // Animate score ring on mount (or after scan)
+  function animateScore(target: number) {
+    setAnimatedScore(0);
+    let current = 0;
+    const interval = setInterval(() => {
+      current++;
+      setAnimatedScore(current);
+      if (current >= target) clearInterval(interval);
+    }, 18);
+  }
+
+  useEffect(() => {
+    const timer = setTimeout(() => animateScore(38), 500);
     return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Active data — live results override mock data
+  const activeVulns: Vulnerability[] = liveVulns ?? MOCK_VULNERABILITIES;
+  const activeCounts: SeverityCount = liveCounts ?? SEVERITY_COUNTS;
+  const activeTotal: number = Object.values(activeCounts).reduce((a, b) => a + b, 0);
 
   // Filtered vulnerability list
   const filteredVulns: Vulnerability[] =
     filter === "all"
-      ? MOCK_VULNERABILITIES
-      : MOCK_VULNERABILITIES.filter((v: Vulnerability) => v.severity === filter);
+      ? activeVulns
+      : activeVulns.filter((v: Vulnerability) => v.severity === filter);
 
   const handleFilterToggle = (sev: Severity): void => {
     setFilter((prev: Severity | "all") => (prev === sev ? "all" : sev));
   };
 
-  const handleScan = (url: string): void => {
-    console.log("Scanning repo:", url);
-    // TODO: call FastAPI backend — POST /api/scan { repoUrl: url }
+  const handleScan = async (inputPath: string): Promise<void> => {
+    setScanError(null);
+    setScanInfo(null);
+    setLiveVulns(null);
+    setLiveCounts(null);
+    setLiveScore(null);
+
+    try {
+      const res = await fetch("/api/scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: inputPath }),
+      });
+      const data: OsvScanResponse = await res.json();
+
+      if (!res.ok || data.error) {
+        setScanError(data.error ?? "Scan failed");
+        return;
+      }
+
+      const vulns = (data.vulnerabilities ?? []) as Vulnerability[];
+      const counts = data.counts ?? { critical: 0, high: 0, medium: 0, low: 0 };
+      const score = data.score ?? 100;
+
+      setLiveVulns(vulns);
+      setLiveCounts(counts);
+      setLiveScore(score);
+      setScanInfo(
+        vulns.length === 0
+          ? `✓ No vulnerabilities found in ${data.scannedPath}`
+          : `Found ${vulns.length} issue(s) in ${data.scannedPath}`
+      );
+      animateScore(score);
+      setFilter("all");
+    } catch (err: unknown) {
+      setScanError((err as Error).message ?? "Network error");
+    }
   };
 
   return (
@@ -505,6 +685,28 @@ export default function SecureGuardPage() {
         {/* Scan input */}
         <ScanInput onScan={handleScan} />
 
+        {/* Scan result banners */}
+        {scanError && (
+          <div style={{
+            marginBottom: "16px", padding: "10px 14px",
+            background: "#1a0505", border: "1px solid #3d0a0a",
+            borderRadius: "8px", fontSize: "11px",
+            color: "#ff6b6b", fontFamily: "'DM Mono', monospace",
+          }}>
+            ✕ {scanError}
+          </div>
+        )}
+        {scanInfo && !scanError && (
+          <div style={{
+            marginBottom: "16px", padding: "10px 14px",
+            background: "#051a0a", border: "1px solid #0a3d1a",
+            borderRadius: "8px", fontSize: "11px",
+            color: "#40c070", fontFamily: "'DM Mono', monospace",
+          }}>
+            {scanInfo}{liveScore !== null ? ` — security score: ${liveScore}/100` : ""}
+          </div>
+        )}
+
         {/* Score + Severity cards */}
         <div style={{
           display: "grid",
@@ -535,13 +737,13 @@ export default function SecureGuardPage() {
 
           {/* Severity cards grid */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "10px" }}>
-            {(Object.entries(SEVERITY_COUNTS) as [Severity, number][]).map(
+            {(Object.entries(activeCounts) as [Severity, number][]).map(
               ([sev, count]: [Severity, number]) => (
                 <SeverityCard
                   key={sev}
                   severity={sev}
                   count={count}
-                  total={TOTAL_ISSUES}
+                  total={activeTotal}
                   active={filter === sev}
                   onClick={() => handleFilterToggle(sev)}
                 />
